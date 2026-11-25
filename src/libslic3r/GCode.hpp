@@ -908,6 +908,12 @@ protected:
     bool                                m_second_layer_things_done;
     // Index of a last object copy extruded.
     std::pair<const PrintObject*, Point> m_last_obj_copy;
+    // Orca: set when the next travel leads to another object copy (retract_lift_enforce = Between Objects).
+    bool                                m_travel_to_other_object { false };
+    // Orca: set by travel_to() when the travel leaves the current island (retract_lift_enforce = Between Islands).
+    bool                                m_travel_between_islands { false };
+    // Orca: index of the layer island (lslices) containing the point, -1 if none.
+    int                                 island_index(const Point &point) const;
 
     // 1 << 0: A1 series cannot supprot traditional timelapse when printing by object (cannot turn on timelapse)
     // 1 << 1: A1 series cannot supprot traditional timelapse with spiral vase mode   (cannot turn on timelapse)

@@ -7716,8 +7716,11 @@ LayerResult GCode::process_layer(
                 // When starting a new object, use the external motion planner for the first travel move.
                 const Point &offset = instance_to_print.print_object.instances()[instance_to_print.instance_id].shift;
                 std::pair<const PrintObject*, Point> this_object_copy(&instance_to_print.print_object, offset);
-                if (m_last_obj_copy != this_object_copy)
+                if (m_last_obj_copy != this_object_copy) {
                     m_avoid_crossing_perimeters.use_external_mp_once();
+                    // Orca: the next travel goes to another object, used by retract_lift_enforce = Between Objects.
+                    m_travel_to_other_object = true;
+                }
                 m_last_obj_copy = this_object_copy;
                 this->set_origin(unscale(offset));
                 this->on_set_origin(&instance_to_print.print_object, offset);
@@ -7728,8 +7731,11 @@ LayerResult GCode::process_layer(
                     // When starting a new object, use the external motion planner for the first travel move.
                     const Point& offset = instance_to_print.print_object.instances()[instance_to_print.instance_id].shift;
                     std::pair<const PrintObject*, Point> this_object_copy(&instance_to_print.print_object, offset);
-                    if (m_last_obj_copy != this_object_copy)
+                    if (m_last_obj_copy != this_object_copy) {
                         m_avoid_crossing_perimeters.use_external_mp_once();
+                        // Orca: the next travel goes to another object, used by retract_lift_enforce = Between Objects.
+                        m_travel_to_other_object = true;
+                    }
                     m_last_obj_copy = this_object_copy;
                     this->set_origin(unscale(offset));
                     this->on_set_origin(&instance_to_print.print_object, offset);
@@ -7802,8 +7808,11 @@ LayerResult GCode::process_layer(
                     // When starting a new object, use the external motion planner for the first travel move.
                     const Point& offset = instance_to_print.print_object.instances()[instance_to_print.instance_id].shift;
                     std::pair<const PrintObject*, Point> this_object_copy(&instance_to_print.print_object, offset);
-                    if (m_last_obj_copy != this_object_copy)
+                    if (m_last_obj_copy != this_object_copy) {
                         m_avoid_crossing_perimeters.use_external_mp_once();
+                        // Orca: the next travel goes to another object, used by retract_lift_enforce = Between Objects.
+                        m_travel_to_other_object = true;
+                    }
                     m_last_obj_copy = this_object_copy;
                     this->set_origin(unscale(offset));
                     this->on_set_origin(&instance_to_print.print_object, offset);
@@ -7942,8 +7951,11 @@ LayerResult GCode::process_layer(
 
                 const Point &offset = inst.shift;
                 std::pair<const PrintObject*, Point> this_object_copy(&instance_to_print.print_object, offset);
-                if (m_last_obj_copy != this_object_copy)
+                if (m_last_obj_copy != this_object_copy) {
                     m_avoid_crossing_perimeters.use_external_mp_once();
+                    // Orca: the next travel goes to another object, used by retract_lift_enforce = Between Objects.
+                    m_travel_to_other_object = true;
+                }
                 m_last_obj_copy = this_object_copy;
                 this->set_origin(unscale(offset));
                 // Same as the main instance loop: a belt printer rotates the origin through
@@ -10570,6 +10582,13 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
         this->gcode_to_point(to_2d(start_gcode_position->position)) : this->last_pos();
     Polyline travel { travel_start, point };
 
+    // Orca: retract_lift_enforce = Between Islands lifts when the travel goes to another object
+    // or connects two separate islands of the current layer.
+    m_travel_between_islands = false;
+    if (m_writer.filament() != nullptr &&
+        RetractLiftEnforceType(FILAMENT_CONFIG(retract_lift_enforce)) == RetractLiftEnforceType::rletBetweenIslands)
+        m_travel_between_islands = m_travel_to_other_object || this->island_index(travel_start) != this->island_index(point);
+
     // check whether a straight travel move would need retraction
     LiftType lift_type = LiftType::SpiralLift;
     bool needs_retraction = this->needs_retraction(travel, role, lift_type);
@@ -10753,6 +10772,10 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
     }
 
 
+    // The travel to the new object has been planned, later travels stay inside it.
+    m_travel_to_other_object = false;
+    m_travel_between_islands = false;
+
     // if needed, write the gcode_label_objects_end then gcode_label_objects_start
     m_writer.add_object_change_labels(gcode);
 
@@ -10831,12 +10854,49 @@ LiftType GCode::to_lift_type(ZHopType z_hop_types) {
     }
 };
 
+int GCode::island_index(const Point &point) const
+{
+    // Support layers have no islands of their own, all their travels count as "outside".
+    if (m_layer == nullptr || dynamic_cast<const SupportLayer*>(m_layer) != nullptr)
+        return -1;
+    const ExPolygons               &islands = m_layer->lslices;
+    const std::vector<BoundingBox> &bboxes  = m_layer->lslices_bboxes;
+    const bool                      use_bboxes = bboxes.size() == islands.size();
+    // A point on the outer wall may lie a little outside the slice, accept it within one nozzle diameter.
+    coord_t tolerance = scale_(0.4);
+    if (m_writer.filament() != nullptr) {
+        const size_t extruder_id = m_writer.filament()->extruder_id();
+        if (extruder_id < m_config.nozzle_diameter.size())
+            tolerance = scale_(m_config.nozzle_diameter.get_at(extruder_id));
+    }
+    int near_idx = -1;
+    for (size_t i = 0; i < islands.size(); ++i) {
+        if (use_bboxes) {
+            BoundingBox bbox = bboxes[i];
+            bbox.offset(tolerance);
+            if (!bbox.contains(point))
+                continue;
+        }
+        if (islands[i].contains(point))
+            return int(i);
+        if (near_idx == -1 && (islands[i].point_projection(point) - point).cast<double>().norm() <= double(tolerance))
+            near_idx = int(i);
+    }
+    return near_idx;
+}
+
 bool GCode::needs_retraction(const Polyline &travel, ExtrusionRole role, LiftType& lift_type)
 {
     const bool leaving_external_perimeter = is_perimeter(m_last_processor_extrusion_role) && m_last_processor_extrusion_role != erPerimeter;
     // Orca: a short travel off the outer wall drags its hot end inward; retract_after_outer_wall ignores the threshold there.
     const bool force_after_outer_wall = m_retract_after_last_path && travel.length() > SCALED_EPSILON;
-    if (!force_after_outer_wall && travel.length() < scale_(FILAMENT_CONFIG(retraction_minimum_travel))) {
+    // Orca: retract_lift_enforce = Between Objects / Between Islands asks for a lift when moving to another
+    // part, so such a travel retracts (and lifts) even if it is shorter than retraction_minimum_travel.
+    const RetractLiftEnforceType lift_enforce = RetractLiftEnforceType(FILAMENT_CONFIG(retract_lift_enforce));
+    const bool force_part_change_lift = travel.length() > SCALED_EPSILON &&
+        ((lift_enforce == RetractLiftEnforceType::rletBetweenObjects && m_travel_to_other_object) ||
+         (lift_enforce == RetractLiftEnforceType::rletBetweenIslands && m_travel_between_islands));
+    if (!force_after_outer_wall && !force_part_change_lift && travel.length() < scale_(FILAMENT_CONFIG(retraction_minimum_travel))) {
         // skip retraction if the move is shorter than the configured threshold
         return false;
     }
@@ -11007,6 +11067,16 @@ std::string GCode::retract(bool toolchange, bool is_last_retraction, LiftType li
     }
     else if (this->m_layer_index == 0 && (retract_lift_type == RetractLiftEnforceType::rletBottomOnly || retract_lift_type == RetractLiftEnforceType::rletTopAndBottom)) {
         can_lift = true;
+    }
+    else if (retract_lift_type == RetractLiftEnforceType::rletBetweenObjects) {
+        // Orca: lift only when traveling from one object (instance) to another, e.g. for printers
+        // with a bed mesh where travels over a finished neighbour are the risky ones.
+        can_lift = m_travel_to_other_object;
+    }
+    else if (retract_lift_type == RetractLiftEnforceType::rletBetweenIslands) {
+        // Orca: lift when traveling to another object or between separate islands of one layer
+        // (e.g. the segments of a print-in-place articulated model). Set by travel_to().
+        can_lift = m_travel_between_islands;
     }
     else if (retract_lift_type == RetractLiftEnforceType::rletTopOnly || retract_lift_type == RetractLiftEnforceType::rletTopAndBottom) {
         can_lift = last_fill_extrusion_role_top_infill;

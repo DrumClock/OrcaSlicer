@@ -623,7 +623,9 @@ enum RetractLiftEnforceType {
     rletAllSurfaces = 0,
     rletTopOnly,
     rletBottomOnly,
-    rletTopAndBottom
+    rletTopAndBottom,
+    rletBetweenObjects,
+    rletBetweenIslands
 };
 
 enum class GCodeThumbnailsFormat {
@@ -1495,7 +1497,6 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloat,                bridge_angle))
     ((ConfigOptionFloat,                internal_bridge_angle)) // ORCA: Internal bridge angle override
     ((ConfigOptionBool,                 relative_bridge_angle)) // ORCA: Relative bridge angle flag
-    ((ConfigOptionInt,                  bridge_anchor_walls)) // ORCA: Anchor external bridges over this many walls
     ((ConfigOptionFloat,                bridge_flow))
     ((ConfigOptionFloatOrPercent,       bridge_line_width))
     ((ConfigOptionFloat,                internal_bridge_flow))

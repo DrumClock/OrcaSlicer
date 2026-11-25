@@ -709,7 +709,9 @@ static const t_config_enum_values s_keys_map_RetractLiftEnforceType = {
     {"All Surfaces",        rletAllSurfaces},
     {"Top Only",         rletTopOnly},
     {"Bottom Only",      rletBottomOnly},
-    {"Top and Bottom",      rletTopAndBottom}
+    {"Top and Bottom",      rletTopAndBottom},
+    {"Between Objects",     rletBetweenObjects},
+    {"Between Islands",     rletBetweenIslands}
 };
 CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS(RetractLiftEnforceType)
 
@@ -1687,21 +1689,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("When enabled, the bridge angle values are added to the automatically calculated bridge direction instead of overriding it.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
-
-    // ORCA: Bridge anchor walls
-    def = this->add("bridge_anchor_walls", coInt);
-    def->label = L("Bridge anchor walls");
-    def->category = L("Quality");
-    def->tooltip = L("How far external bridges reach onto the supported area around them, as a number of walls.\n"
-        "The bridge lines then extend over this many walls of the layer below, which anchors them better "
-        "and reduces sagging and detached bridge ends, especially with 3 or more walls.\n"
-        "If set to 0, the default anchoring is used: one wall over sparse infill and the shell thickness over solid infill.\n"
-        "The anchor is never made shorter than the default one.");
-    def->sidetext = L("walls");
-    def->min = 0;
-    def->max = 20;
-    def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionInt(0));
 
     def = this->add("bridge_density", coPercent);
     def->label = L("External bridge density");
@@ -6494,16 +6481,25 @@ void PrintConfigDef::init_fff_params()
 
     def = this->add("retract_lift_enforce", coEnums);
     def->label = L("On surfaces");
-    def->tooltip = L("Enforce Z-Hop behavior. This setting is impacted by the above settings (Only lift Z above/below).");
+    def->tooltip = L("Enforce Z-Hop behavior. This setting is impacted by the above settings (Only lift Z above/below).\n\n"
+                     "Between Objects: Z-Hop is performed only when traveling from one object to another, "
+                     "other travels are done without lifting.\n"
+                     "Between Islands: Z-Hop is performed when traveling to another object or to another separate island "
+                     "of the same layer (e.g. separate parts of a print-in-place articulated model), "
+                     "travels inside one island are done without lifting.");
     def->enum_keys_map = &ConfigOptionEnum<RetractLiftEnforceType>::get_enum_values();
     def->enum_values.push_back("All Surfaces");
     def->enum_values.push_back("Top Only");
     def->enum_values.push_back("Bottom Only");
     def->enum_values.push_back("Top and Bottom");
+    def->enum_values.push_back("Between Objects");
+    def->enum_values.push_back("Between Islands");
     def->enum_labels.push_back(L("All Surfaces"));
     def->enum_labels.push_back(L("Top Only"));
     def->enum_labels.push_back(L("Bottom Only"));
     def->enum_labels.push_back(L("Top and Bottom"));
+    def->enum_labels.push_back(L("Between Objects"));
+    def->enum_labels.push_back(L("Between Islands"));
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionEnumsGeneric{RetractLiftEnforceType ::rletAllSurfaces});
 
